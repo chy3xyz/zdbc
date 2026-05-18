@@ -557,33 +557,16 @@ fn runBenchmark(allocator: std.mem.Allocator, config: Config) !void {
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
-    // Check for comparison mode flag
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
-
-    const run_comparison = args.len > 1 and std.mem.eql(u8, args[1], "--compare");
-
-    if (run_comparison) {
-        // Run performance comparison with smaller dataset
-        const config = Config{
-            .total_records = 10_000,
-            .batch_size = 1000,
-            .db_path = "comparison.db",
-            .fast_mode = true,
-        };
-        try runComparison(allocator, config);
-    } else {
-        // Run standard benchmark
-        const config = Config{
-            .total_records = 1_000_000,
-            .batch_size = 1000,
-            .db_path = "log_example.db",
-            .fast_mode = true,
-        };
-        try runBenchmark(allocator, config);
-    }
+    // Run standard benchmark (comparison mode removed for Zig 0.16.0 compatibility)
+    const config = Config{
+        .total_records = 1_000_000,
+        .batch_size = 1000,
+        .db_path = "log_example.db",
+        .fast_mode = true,
+    };
+    try runBenchmark(allocator, config);
 }

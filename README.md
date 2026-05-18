@@ -240,10 +240,19 @@ zig build run-log
 
 ## Requirements
 
-- Zig 0.15.x or later
+- Zig 0.16.0
 - For SQLite: `libsqlite3-dev` (system library)
 - For PostgreSQL: Network access to PostgreSQL server
-- For MySQL: Network access to MySQL/MariaDB server
+- For MySQL: Network access to MySQL/MariaDB server (NOTE: MySQL driver is stubbed for Zig 0.16.0 due to API changes in myzql library)
+
+## Zig 0.16.0 Compatibility
+
+ZDBC has been upgraded to support Zig 0.16.0. However, there are some notes:
+
+- **SQLite**: Fully functional with zqlite.zig
+- **PostgreSQL**: Uses pg.zig with Io.failing placeholder (actual connections require proper Io context setup)
+- **MySQL**: MySQL driver is stubbed due to significant API changes in myzql library which now requires Zig's new async I/O model (Io context). All MySQL operations return `Error.NotImplemented`.
+- **Examples**: Examples are disabled for Zig 0.16.0 due to breaking API changes in the standard library (GeneralPurposeAllocator, argsAlloc, fs.cwd, etc.)
 
 ## Testing
 

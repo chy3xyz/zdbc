@@ -17,6 +17,23 @@ const Value = @import("../value.zig").Value;
 const Error = @import("../error.zig").Error;
 const Uri = @import("../uri.zig").Uri;
 
+var global_io_threaded: std.Io.Threaded = undefined;
+var global_io_initialized: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
+
+fn getGlobalIo() std.Io {
+    if (global_io_initialized.load(.acquire)) {
+        return global_io_threaded.io();
+    }
+
+    const gpa = std.heap.page_allocator;
+    const single_threaded = @import("builtin").single_threaded;
+    global_io_threaded = std.Io.Threaded.init(gpa, .{
+        .async_limit = if (single_threaded) .nothing else null,
+    });
+    global_io_initialized.store(true, .release);
+    return global_io_threaded.io();
+}
+
 /// PostgreSQL connection context
 pub const PgContext = struct {
     allocator: std.mem.Allocator,
@@ -29,12 +46,12 @@ pub const PgContext = struct {
         const host = uri.host orelse "127.0.0.1";
         const port = uri.port orelse 5432;
 
-        var conn = pg.Conn.open(allocator, .{
+        const io = getGlobalIo();
+        var conn = pg.Conn.open(io, allocator, .{
             .host = host,
             .port = port,
         }) catch return error.ConnectionFailed;
 
-        // Authenticate
         conn.auth(.{
             .username = uri.username orelse "postgres",
             .password = uri.password,
@@ -121,10 +138,8 @@ fn pgResultColumnName(_: *anyopaque, _: usize) ?[]const u8 {
 fn pgResultGetValue(ctx: *anyopaque, index: usize) Error!Value {
     const result_ctx: *PgResultContext = @ptrCast(@alignCast(ctx));
     if (result_ctx.current_row) |row| {
-        if (row.get(?[]const u8, index)) |text| {
-            return Value.initText(text);
-        }
-        return Value.initNull();
+        const text = row.get([]const u8, index) catch return Error.ExecutionFailed;
+        return Value.initText(text);
     }
     return Error.NoMoreRows;
 }
@@ -259,27 +274,33 @@ test "postgresql driver interface" {
 // ============================================================================
 
 fn getPgTestUri(allocator: std.mem.Allocator) ?[]const u8 {
-    const password = std.process.getEnvVarOwned(allocator, "ZDBC_PG_PASSWORD") catch return null;
+    const password_bytes = std.c.getenv("ZDBC_PG_PASSWORD");
+    if (password_bytes == null) return null;
+    const password = allocator.dupeZ(u8, std.mem.span(password_bytes).?) catch return null;
     defer allocator.free(password);
 
-    const host = std.process.getEnvVarOwned(allocator, "ZDBC_PG_HOST") catch allocator.dupe(u8, "localhost") catch return null;
-    defer allocator.free(host);
+    const host_str = std.c.getenv("ZDBC_PG_HOST") orelse "localhost";
+    const host_bytes = allocator.dupe(u8, std.mem.span(host_str)) catch return null;
+    defer allocator.free(host_bytes);
 
-    const port = std.process.getEnvVarOwned(allocator, "ZDBC_PG_PORT") catch allocator.dupe(u8, "5432") catch return null;
-    defer allocator.free(port);
+    const port_str = std.c.getenv("ZDBC_PG_PORT") orelse "5432";
+    const port_bytes = allocator.dupe(u8, std.mem.span(port_str)) catch return null;
+    defer allocator.free(port_bytes);
 
-    const user = std.process.getEnvVarOwned(allocator, "ZDBC_PG_USER") catch allocator.dupe(u8, "postgres") catch return null;
-    defer allocator.free(user);
+    const user_str = std.c.getenv("ZDBC_PG_USER") orelse "postgres";
+    const user_bytes = allocator.dupe(u8, std.mem.span(user_str)) catch return null;
+    defer allocator.free(user_bytes);
 
-    const database = std.process.getEnvVarOwned(allocator, "ZDBC_PG_DATABASE") catch allocator.dupe(u8, "zdbc_test") catch return null;
-    defer allocator.free(database);
+    const db_str = std.c.getenv("ZDBC_PG_DATABASE") orelse "zdbc_test";
+    const database_bytes = allocator.dupe(u8, std.mem.span(db_str)) catch return null;
+    defer allocator.free(database_bytes);
 
     return std.fmt.allocPrint(allocator, "postgresql://{s}:{s}@{s}:{s}/{s}", .{
-        user,
+        user_bytes,
         password,
-        host,
-        port,
-        database,
+        host_bytes,
+        port_bytes,
+        database_bytes,
     }) catch return null;
 }
 
