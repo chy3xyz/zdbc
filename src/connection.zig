@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const Value = @import("value.zig").Value;
+const SqlParam = @import("value.zig").SqlParam;
 const Result = @import("result.zig").Result;
 const Row = @import("result.zig").Row;
 const Statement = @import("statement.zig").Statement;
@@ -16,10 +17,10 @@ const Uri = @import("uri.zig").Uri;
 pub const ConnectionVTable = struct {
     /// Execute a query that does not return rows (INSERT, UPDATE, DELETE, CREATE, etc.)
     /// Returns the number of affected rows
-    exec: *const fn (ctx: *anyopaque, allocator: std.mem.Allocator, sql: []const u8, params: []const Value) Error!usize,
+    exec: *const fn (ctx: *anyopaque, allocator: std.mem.Allocator, sql: []const u8, params: []const SqlParam) Error!usize,
 
     /// Execute a query that returns rows (SELECT)
-    query: *const fn (ctx: *anyopaque, allocator: std.mem.Allocator, sql: []const u8, params: []const Value) Error!Result,
+    query: *const fn (ctx: *anyopaque, allocator: std.mem.Allocator, sql: []const u8, params: []const SqlParam) Error!Result,
 
     /// Prepare a statement for repeated execution
     prepare: *const fn (ctx: *anyopaque, allocator: std.mem.Allocator, sql: []const u8) Error!Statement,
@@ -66,8 +67,13 @@ pub const Connection = struct {
 
     /// Execute a query that does not return rows
     /// SQL injection prevention: Use parameterized queries with params
-    pub fn exec(self: *const Connection, sql: []const u8, params: []const Value) Error!usize {
+    pub fn exec(self: *const Connection, sql: []const u8, params: []const SqlParam) Error!usize {
         return self.vtable.exec(self.ctx, self.allocator, sql, params);
+    }
+
+    /// Execute a query with parameters (explicit version)
+    pub fn execParams(self: *const Connection, sql: []const u8, params: []const SqlParam) Error!usize {
+        return self.exec(sql, params);
     }
 
     /// Execute a query with no parameters
@@ -77,8 +83,13 @@ pub const Connection = struct {
 
     /// Execute a query that returns rows
     /// SQL injection prevention: Use parameterized queries with params
-    pub fn query(self: *const Connection, sql: []const u8, params: []const Value) Error!Result {
+    pub fn query(self: *const Connection, sql: []const u8, params: []const SqlParam) Error!Result {
         return self.vtable.query(self.ctx, self.allocator, sql, params);
+    }
+
+    /// Execute a query with parameters (explicit version)
+    pub fn queryParams(self: *const Connection, sql: []const u8, params: []const SqlParam) Error!Result {
+        return self.query(sql, params);
     }
 
     /// Execute a query with no parameters
@@ -93,7 +104,7 @@ pub const Connection = struct {
     /// for another query. The Row becomes invalid after the result is cleaned up.
     ///
     /// For safer usage, consider using `query()` directly and managing the Result lifetime.
-    pub fn row(self: *const Connection, sql: []const u8, params: []const Value) Error!?Row {
+    pub fn row(self: *const Connection, sql: []const u8, params: []const SqlParam) Error!?Row {
         var result = try self.query(sql, params);
         defer result.deinit();
 
@@ -171,4 +182,11 @@ test "Connection VTable structure" {
     // Verify VTable has correct size and alignment
     try std.testing.expect(@sizeOf(ConnectionVTable) > 0);
     try std.testing.expect(@alignOf(ConnectionVTable) >= @alignOf(*anyopaque));
+}
+
+test "Connection execParams and queryParams API" {
+    // Verify these functions exist and have correct signatures
+    const ConnectionType = Connection;
+    try std.testing.expect(@hasDecl(ConnectionType, "execParams"));
+    try std.testing.expect(@hasDecl(ConnectionType, "queryParams"));
 }

@@ -11,6 +11,7 @@ const ResultVTable = @import("../result.zig").ResultVTable;
 const Statement = @import("../statement.zig").Statement;
 const StatementVTable = @import("../statement.zig").StatementVTable;
 const Value = @import("../value.zig").Value;
+const SqlParam = @import("../value.zig").SqlParam;
 const Error = @import("../error.zig").Error;
 const Uri = @import("../uri.zig").Uri;
 
@@ -182,7 +183,7 @@ pub const mockConnectionVTable = ConnectionVTable{
     .lastError = mockLastError,
 };
 
-fn mockExec(ctx: *anyopaque, _: std.mem.Allocator, _: []const u8, _: []const Value) Error!usize {
+fn mockExec(ctx: *anyopaque, _: std.mem.Allocator, _: []const u8, _: []const SqlParam) Error!usize {
     const mock_ctx: *MockContext = @ptrCast(@alignCast(ctx));
     if (mock_ctx.closed) return Error.NotConnected;
     mock_ctx.affected_rows = 1;
@@ -190,7 +191,7 @@ fn mockExec(ctx: *anyopaque, _: std.mem.Allocator, _: []const u8, _: []const Val
     return 1;
 }
 
-fn mockQuery(ctx: *anyopaque, allocator: std.mem.Allocator, _: []const u8, _: []const Value) Error!Result {
+fn mockQuery(ctx: *anyopaque, allocator: std.mem.Allocator, _: []const u8, _: []const SqlParam) Error!Result {
     const mock_ctx: *MockContext = @ptrCast(@alignCast(ctx));
     if (mock_ctx.closed) return Error.NotConnected;
 

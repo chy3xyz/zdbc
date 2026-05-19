@@ -13,7 +13,9 @@ const Result = @import("../result.zig").Result;
 const ResultVTable = @import("../result.zig").ResultVTable;
 const Statement = @import("../statement.zig").Statement;
 const StatementVTable = @import("../statement.zig").StatementVTable;
-const Value = @import("../value.zig").Value;
+const value = @import("../value.zig");
+const Value = value.Value;
+const SqlParam = value.SqlParam;
 const Error = @import("../error.zig").Error;
 const Uri = @import("../uri.zig").Uri;
 
@@ -172,12 +174,25 @@ pub const pgConnectionVTable = ConnectionVTable{
     .lastError = pgLastError,
 };
 
-fn pgExec(ctx: *anyopaque, _: std.mem.Allocator, sql: []const u8, params: []const Value) Error!usize {
+fn pgExec(ctx: *anyopaque, allocator: std.mem.Allocator, sql: []const u8, params: []const SqlParam) Error!usize {
     const pg_ctx: *PgContext = @ptrCast(@alignCast(ctx));
-    _ = params;
 
-    const affected = pg_ctx.conn.exec(sql, .{}) catch return Error.ExecutionFailed;
-    // exec returns ?i64, need to convert to usize
+    var sql_to_use: []const u8 = sql;
+    var need_to_free = false;
+
+    if (params.len > 0) {
+        sql_to_use = value.interpolateSqlParamPostgres(allocator, sql, params) catch return Error.InvalidParameter;
+        need_to_free = true;
+    }
+
+    errdefer if (need_to_free) allocator.free(sql_to_use);
+
+    const affected = pg_ctx.conn.exec(sql_to_use, .{}) catch return Error.ExecutionFailed;
+
+    if (need_to_free) {
+        allocator.free(sql_to_use);
+    }
+
     if (affected) |count| {
         pg_ctx.affected_rows = if (count >= 0) @intCast(count) else 0;
     } else {
@@ -186,11 +201,24 @@ fn pgExec(ctx: *anyopaque, _: std.mem.Allocator, sql: []const u8, params: []cons
     return pg_ctx.affected_rows;
 }
 
-fn pgQuery(ctx: *anyopaque, allocator: std.mem.Allocator, sql: []const u8, params: []const Value) Error!Result {
+fn pgQuery(ctx: *anyopaque, allocator: std.mem.Allocator, sql: []const u8, params: []const SqlParam) Error!Result {
     const pg_ctx: *PgContext = @ptrCast(@alignCast(ctx));
-    _ = params;
 
-    const result = pg_ctx.conn.query(sql, .{}) catch return Error.ExecutionFailed;
+    var sql_to_use: []const u8 = sql;
+    var need_to_free = false;
+
+    if (params.len > 0) {
+        sql_to_use = value.interpolateSqlParamPostgres(allocator, sql, params) catch return Error.InvalidParameter;
+        need_to_free = true;
+    }
+
+    errdefer if (need_to_free) allocator.free(sql_to_use);
+
+    const result = pg_ctx.conn.query(sql_to_use, .{}) catch return Error.ExecutionFailed;
+
+    if (need_to_free) {
+        allocator.free(sql_to_use);
+    }
 
     const result_ctx = PgResultContext.init(allocator) catch return Error.OutOfMemory;
     result_ctx.result = result;

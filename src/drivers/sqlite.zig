@@ -14,6 +14,7 @@ const ResultVTable = @import("../result.zig").ResultVTable;
 const Statement = @import("../statement.zig").Statement;
 const StatementVTable = @import("../statement.zig").StatementVTable;
 const Value = @import("../value.zig").Value;
+const SqlParam = @import("../value.zig").SqlParam;
 const Error = @import("../error.zig").Error;
 const Uri = @import("../uri.zig").Uri;
 
@@ -160,27 +161,16 @@ fn sqliteResultDeinit(ctx: *anyopaque) void {
 }
 
 /// Helper function to bind parameters to a prepared statement
-fn bindParameters(stmt: zqlite.Stmt, params: []const Value) Error!void {
+fn bindParameters(stmt: zqlite.Stmt, params: []const SqlParam) Error!void {
     for (params, 0..) |param, i| {
         switch (param) {
             .null => {
                 stmt.bindValue(@as(?i64, null), i) catch return Error.BindError;
             },
-            .boolean => |b| {
-                const val: i64 = if (b) 1 else 0;
-                stmt.bindValue(val, i) catch return Error.BindError;
-            },
             .int => |val| {
                 stmt.bindValue(val, i) catch return Error.BindError;
             },
-            .uint => |val| {
-                if (val <= std.math.maxInt(i64)) {
-                    stmt.bindValue(@as(i64, @intCast(val)), i) catch return Error.BindError;
-                } else {
-                    return Error.BindError;
-                }
-            },
-            .float => |val| {
+            .real => |val| {
                 stmt.bindValue(val, i) catch return Error.BindError;
             },
             .text => |val| {
@@ -208,7 +198,7 @@ pub const sqliteConnectionVTable = ConnectionVTable{
     .lastError = sqliteLastError,
 };
 
-fn sqliteExec(ctx: *anyopaque, _: std.mem.Allocator, sql: []const u8, params: []const Value) Error!usize {
+fn sqliteExec(ctx: *anyopaque, _: std.mem.Allocator, sql: []const u8, params: []const SqlParam) Error!usize {
     const sqlite_ctx: *SqliteContext = @ptrCast(@alignCast(ctx));
 
     if (params.len > 0) {
@@ -235,7 +225,7 @@ fn sqliteExec(ctx: *anyopaque, _: std.mem.Allocator, sql: []const u8, params: []
     return sqlite_ctx.affected_rows;
 }
 
-fn sqliteQuery(ctx: *anyopaque, allocator: std.mem.Allocator, sql: []const u8, params: []const Value) Error!Result {
+fn sqliteQuery(ctx: *anyopaque, allocator: std.mem.Allocator, sql: []const u8, params: []const SqlParam) Error!Result {
     const sqlite_ctx: *SqliteContext = @ptrCast(@alignCast(ctx));
 
     // Convert to null-terminated string
@@ -1283,7 +1273,7 @@ test "sqlite driver: BUG FIX #2 - Parameterized SELECT with WHERE clause" {
     _ = try conn.exec("INSERT INTO param_test VALUES (3, 'Charlie')", &.{});
 
     // Query with parameter
-    var result = try conn.query("SELECT name FROM param_test WHERE id = ?", &.{Value.initInt(2)});
+    var result = try conn.query("SELECT name FROM param_test WHERE id = ?", &.{SqlParam.bindInt(2)});
     defer result.deinit();
 
     const maybe_row = try result.next();
@@ -1310,7 +1300,7 @@ test "sqlite driver: BUG FIX #2 - Parameterized query with multiple parameters" 
     _ = try conn.exec("INSERT INTO range_test VALUES (20)", &.{});
 
     // Query with two parameters
-    var result = try conn.query("SELECT value FROM range_test WHERE value >= ? AND value <= ? ORDER BY value", &.{ Value.initInt(8), Value.initInt(18) });
+    var result = try conn.query("SELECT value FROM range_test WHERE value >= ? AND value <= ? ORDER BY value", &.{ SqlParam.bindInt(8), SqlParam.bindInt(18) });
     defer result.deinit();
 
     // Should match 10 and 15
@@ -1339,7 +1329,7 @@ test "sqlite driver: BUG FIX #2 - Parameterized query with TEXT parameter" {
     _ = try conn.exec("INSERT INTO text_param_test VALUES (1, 'Alice')", &.{});
     _ = try conn.exec("INSERT INTO text_param_test VALUES (2, 'Bob')", &.{});
 
-    var result = try conn.query("SELECT id FROM text_param_test WHERE name = ?", &.{Value.initText("Alice")});
+    var result = try conn.query("SELECT id FROM text_param_test WHERE name = ?", &.{SqlParam.bindText("Alice")});
     defer result.deinit();
 
     const maybe_row = try result.next();
@@ -1360,7 +1350,7 @@ test "sqlite driver: BUG FIX #2 - Parameterized query with FLOAT parameter" {
     _ = try conn.exec("INSERT INTO float_param_test VALUES (2, 92.3)", &.{});
     _ = try conn.exec("INSERT INTO float_param_test VALUES (3, 78.9)", &.{});
 
-    var result = try conn.query("SELECT id FROM float_param_test WHERE score > ?", &.{Value.initFloat(90.0)});
+    var result = try conn.query("SELECT id FROM float_param_test WHERE score > ?", &.{SqlParam.bindReal(90.0)});
     defer result.deinit();
 
     const maybe_row = try result.next();
@@ -1387,7 +1377,7 @@ test "sqlite driver: BUG FIX #2 - Parameterized query with NULL parameter" {
 
     // Test NULL parameter binding by searching for rows where value equals NULL
     // Note: In SQL, NULL = NULL is false, so we use a COALESCE workaround
-    var result = try conn.query("SELECT id FROM null_param_test WHERE COALESCE(value, ?) = ? ORDER BY id", &.{ Value.initText("NULL_MARKER"), Value.initText("NULL_MARKER") });
+    var result = try conn.query("SELECT id FROM null_param_test WHERE COALESCE(value, ?) = ? ORDER BY id", &.{ SqlParam.bindText("NULL_MARKER"), SqlParam.bindText("NULL_MARKER") });
     defer result.deinit();
 
     const maybe_row1 = try result.next();
@@ -1413,7 +1403,7 @@ test "sqlite driver: BUG FIX #2 - Parameterized query with boolean parameter" {
     _ = try conn.exec("INSERT INTO bool_param_test VALUES (2, 0)", &.{});
     _ = try conn.exec("INSERT INTO bool_param_test VALUES (3, 1)", &.{});
 
-    var result = try conn.query("SELECT id FROM bool_param_test WHERE active = ? ORDER BY id", &.{Value.initBool(true)});
+    var result = try conn.query("SELECT id FROM bool_param_test WHERE active = ? ORDER BY id", &.{SqlParam.bindInt(1)});
     defer result.deinit();
 
     const maybe_row1 = try result.next();
@@ -1442,7 +1432,7 @@ test "sqlite driver: BUG FIX #2 - SQL injection protection with parameters" {
 
     // Attempt SQL injection through parameter (should be safely escaped)
     const malicious_input = "Alice' OR '1'='1";
-    var result = try conn.query("SELECT id FROM injection_test WHERE name = ?", &.{Value.initText(malicious_input)});
+    var result = try conn.query("SELECT id FROM injection_test WHERE name = ?", &.{SqlParam.bindText(malicious_input)});
     defer result.deinit();
 
     // Should return no rows (parameter is treated as literal string)

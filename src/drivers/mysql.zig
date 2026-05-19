@@ -12,7 +12,9 @@ const ConnectionVTable = @import("../connection.zig").ConnectionVTable;
 const Result = @import("../result.zig").Result;
 const ResultVTable = @import("../result.zig").ResultVTable;
 const Statement = @import("../statement.zig").Statement;
-const Value = @import("../value.zig").Value;
+const value = @import("../value.zig");
+const Value = value.Value;
+const SqlParam = value.SqlParam;
 const Error = @import("../error.zig").Error;
 const Uri = @import("../uri.zig").Uri;
 
@@ -184,14 +186,26 @@ const mysqlConnectionVTable = ConnectionVTable{
     .lastError = mysqlLastError,
 };
 
-fn mysqlExec(ctx: *anyopaque, allocator: std.mem.Allocator, sql: []const u8, params: []const Value) Error!usize {
+fn mysqlExec(ctx: *anyopaque, allocator: std.mem.Allocator, sql: []const u8, params: []const SqlParam) Error!usize {
     const mysql_ctx: *MysqlContext = @ptrCast(@alignCast(ctx));
-    _ = allocator;
-    _ = params;
 
-    const result = mysql_ctx.conn.query(mysql_ctx.io, sql) catch {
+    var sql_to_use: []const u8 = sql;
+    var need_to_free = false;
+
+    if (params.len > 0) {
+        sql_to_use = value.interpolateSqlParam(allocator, sql, params) catch return Error.InvalidParameter;
+        need_to_free = true;
+    }
+
+    errdefer if (need_to_free) allocator.free(sql_to_use);
+
+    const result = mysql_ctx.conn.query(mysql_ctx.io, sql_to_use) catch {
         return Error.ExecutionFailed;
     };
+
+    if (need_to_free) {
+        allocator.free(sql_to_use);
+    }
 
     switch (result) {
         .ok => |ok| {
@@ -206,13 +220,26 @@ fn mysqlExec(ctx: *anyopaque, allocator: std.mem.Allocator, sql: []const u8, par
     }
 }
 
-fn mysqlQuery(ctx: *anyopaque, allocator: std.mem.Allocator, sql: []const u8, params: []const Value) Error!Result {
+fn mysqlQuery(ctx: *anyopaque, allocator: std.mem.Allocator, sql: []const u8, params: []const SqlParam) Error!Result {
     const mysql_ctx: *MysqlContext = @ptrCast(@alignCast(ctx));
-    _ = params;
 
-    const result = mysql_ctx.conn.queryRows(allocator, mysql_ctx.io, sql) catch {
+    var sql_to_use: []const u8 = sql;
+    var need_to_free = false;
+
+    if (params.len > 0) {
+        sql_to_use = value.interpolateSqlParam(allocator, sql, params) catch return Error.InvalidParameter;
+        need_to_free = true;
+    }
+
+    errdefer if (need_to_free) allocator.free(sql_to_use);
+
+    const result = mysql_ctx.conn.queryRows(allocator, mysql_ctx.io, sql_to_use) catch {
         return Error.ExecutionFailed;
     };
+
+    if (need_to_free) {
+        allocator.free(sql_to_use);
+    }
 
     switch (result) {
         .rows => |row_result| {

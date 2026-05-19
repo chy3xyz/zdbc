@@ -55,6 +55,7 @@ pub const PooledConnection = @import("pool.zig").PooledConnection;
 
 // Value and result types
 pub const Value = @import("value.zig").Value;
+pub const SqlParam = @import("value.zig").SqlParam;
 pub const fromAny = @import("value.zig").fromAny;
 pub const Result = @import("result.zig").Result;
 pub const ResultVTable = @import("result.zig").ResultVTable;
